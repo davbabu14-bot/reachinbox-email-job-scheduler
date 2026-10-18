@@ -25,4 +25,15 @@ Desktop.ini
 # Coverage / build output
 coverage/
 dist/
+frontend/dist/
 .nyc_output/
+
+# Scratch & Local Ad-hoc Debug scripts
+scratch/*
+!scratch/test-phase3a-suite.js
+!scratch/test-phase3b-suite.js
+!scratch/test-1000-scheduled-emails.js
+!scratch/test-rate-limit-slack-alert.js
+!scratch/test-session-persistence.js
+!scratch/test-live-acceptance.js
+

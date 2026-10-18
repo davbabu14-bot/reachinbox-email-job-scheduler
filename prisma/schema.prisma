@@ -1,0 +1,146 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// ReachInbox Email Scheduler – Prisma Schema
+// ─────────────────────────────────────────────────────────────────────────────
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum EmailStatus {
+  SCHEDULED
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum OutboxStatus {
+  PENDING
+  ENQUEUED
+  FAILED
+}
+
+model User {
+  id               String            @id @default(uuid())
+  googleId         String            @unique @map("google_id")
+  email            String            @unique
+  name             String
+  avatarUrl        String?           @map("avatar_url")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  senders          Sender[]
+  emails           Email[]
+  slackIntegration SlackIntegration?
+
+  @@map("users")
+}
+
+model Sender {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email             String
+  name              String
+  smtpHost          String   @default("smtp.ethereal.email") @map("smtp_host")
+  smtpPort          Int      @default(587) @map("smtp_port")
+  smtpUser          String   @map("smtp_user")
+  // Encrypted at rest using AES-256-GCM
+  smtpPassEncrypted String   @map("smtp_pass_encrypted")
+  smtpPassIv        String   @map("smtp_pass_iv")
+  hourlyLimit       Int      @default(50) @map("hourly_limit")
+  isEthereal        Boolean  @default(true) @map("is_ethereal")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  emails            Email[]
+
+  @@unique([userId, email])
+  @@map("senders")
+}
+
+model Email {
+  id             String       @id @default(uuid())
+  userId         String       @map("user_id")
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  senderId       String       @map("sender_id")
+  sender         Sender       @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  batchId        String?      @map("batch_id")
+  recipient      String
+  subject        String
+  body           String       @db.Text
+  status         EmailStatus  @default(SCHEDULED)
+  scheduledAt    DateTime     @map("scheduled_at")
+  sentAt         DateTime?    @map("sent_at")
+  failedAt       DateTime?    @map("failed_at")
+  previewUrl     String?      @map("preview_url")
+  errorMessage   String?      @map("error_message") @db.Text
+  attemptsMade   Int          @default(0) @map("attempts_made")
+  idempotencyKey String       @unique @map("idempotency_key")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  outboxEntries  EmailOutbox[]
+
+  @@index([userId, status])
+  @@index([scheduledAt])
+  @@index([senderId, scheduledAt])
+  @@map("emails")
+}
+
+// Transactional Outbox Pattern: Ensures database persistence is atomic with queue dispatch
+model EmailOutbox {
+  id          String       @id @default(uuid())
+  emailId     String       @map("email_id")
+  email       Email        @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  status      OutboxStatus @default(PENDING)
+  scheduledAt DateTime     @map("scheduled_at")
+  payloadJson Json         @map("payload_json")
+  attempts    Int          @default(0)
+  lastError   String?      @map("last_error") @db.Text
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@index([status, scheduledAt])
+  @@map("email_outbox")
+}
+
+model SlackIntegration {
+  id                   String   @id @default(uuid())
+  userId               String   @unique @map("user_id")
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId               String   @map("team_id")
+  teamName             String   @map("team_name")
+  // Encrypted at rest using AES-256-GCM
+  accessTokenEncrypted String   @map("access_token_encrypted")
+  accessTokenIv        String   @map("access_token_iv")
+  channelId            String   @map("channel_id")
+  channelName          String   @map("channel_name")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("slack_integrations")
+}
+
+enum SearchAction {
+  INDEX
+  UPDATE
+  DELETE
+}
+
+model SearchIndexOutbox {
+  id          String       @id @default(uuid())
+  emailId     String       @map("email_id")
+  action      SearchAction @default(INDEX)
+  status      OutboxStatus @default(PENDING)
+  payloadJson Json         @map("payload_json")
+  attempts    Int          @default(0)
+  lastError   String?      @map("last_error") @db.Text
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@map("search_index_outbox")
+}
+

@@ -6,7 +6,16 @@
   "scripts": {
     "start": "node src/server.js",
     "worker": "node src/worker.js",
+    "start:v2": "node dist/api/server.js",
+    "worker:v2": "node dist/worker/emailWorker.js",
     "dev": "node src/server.js",
+    "build": "tsc",
+    "build:all": "tsc && npm run build --prefix frontend",
+    "frontend:dev": "npm run dev --prefix frontend",
+    "frontend:build": "npm run build --prefix frontend",
+    "frontend:preview": "npm run preview --prefix frontend",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,11 +23,30 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@bull-board/api": "^9.10.4",
+    "@bull-board/express": "^9.10.4",
+    "@elastic/elasticsearch": "^9.5.1",
+    "@prisma/client": "^6.19.3",
+    "@slack/web-api": "^8.2.0",
     "bullmq": "^6.3.16",
+    "connect-redis": "^10.0.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.8",
     "express": "^5.3.0",
+    "express-session": "^1.19.0",
+    "google-auth-library": "^11.3.1",
     "ioredis": "^6.0.0",
-    "nodemailer": "^10.1.2"
+    "nodemailer": "^10.1.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/express-session": "^1.19.0",
+    "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
+    "prisma": "^6.19.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
   }
 }
