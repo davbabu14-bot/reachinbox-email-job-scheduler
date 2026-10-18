@@ -67,6 +67,20 @@ export const api = {
       });
     },
 
+    async loginWithPassword(email: string, password: string): Promise<{ success: boolean; user: User }> {
+      return request('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+    },
+
+    async registerWithPassword(email: string, password: string, name?: string): Promise<{ success: boolean; user: User }> {
+      return request('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      });
+    },
+
     async getCurrentUser(): Promise<{ success: boolean; user: User }> {
       return request('/auth/me', { method: 'GET' });
     },

@@ -21,6 +21,8 @@ import { searchEmails, reindexAllUserEmails, dispatchPendingSearchIndex } from '
 import {
   verifyGoogleIdToken,
   findOrCreateGoogleUser,
+  registerWithPassword,
+  loginWithPassword,
 } from '../services/authService';
 import {
   getSlackAuthorizeUrl,
@@ -113,6 +115,17 @@ const googleAuthSchema = z.object({
   idToken: z.string().min(1, 'idToken is required'),
 });
 
+const registerSchema = z.object({
+  email: z.string().email('Valid email address is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters long'),
+  name: z.string().min(1, 'Name is required').optional(),
+});
+
+const loginSchema = z.object({
+  email: z.string().email('Valid email address is required'),
+  password: z.string().min(1, 'Password is required'),
+});
+
 router.post('/auth/google', async (req: Request, res: Response): Promise<void> => {
   try {
     const { idToken } = googleAuthSchema.parse(req.body);
@@ -120,29 +133,35 @@ router.post('/auth/google', async (req: Request, res: Response): Promise<void> =
     const verifiedProfile = await verifyGoogleIdToken(idToken);
     const user = await findOrCreateGoogleUser(verifiedProfile);
 
-    // Establish authenticated HTTP-only session and ensure Redis commit completes
-    (req.session as any).userId = user.id;
-
-    req.session.save((saveErr) => {
-      if (saveErr) {
-        console.error('[Auth] Failed to persist session to Redis:', saveErr);
-        res.status(500).json({
-          success: false,
-          error: 'SessionPersistenceError',
-          message: 'Failed to establish persistent session in Redis store',
-        });
-        return;
+    // Regenerate session to prevent fixation and ensure Redis commit completes
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        console.error('[Auth] Failed to regenerate session on Google login:', regenErr);
       }
 
-      res.json({
-        success: true,
-        message: 'Successfully authenticated with Google',
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          avatarUrl: user.avatarUrl,
-        },
+      (req.session as any).userId = user.id;
+
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('[Auth] Failed to persist session to Redis:', saveErr);
+          res.status(500).json({
+            success: false,
+            error: 'SessionPersistenceError',
+            message: 'Failed to establish persistent session in Redis store',
+          });
+          return;
+        }
+
+        res.json({
+          success: true,
+          message: 'Successfully authenticated with Google',
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          },
+        });
       });
     });
   } catch (err: any) {
@@ -154,6 +173,147 @@ router.post('/auth/google', async (req: Request, res: Response): Promise<void> =
       success: false,
       error: 'AuthenticationFailed',
       message: err.message || 'Failed to authenticate Google ID token',
+    });
+  }
+});
+
+router.post('/auth/register', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const input = registerSchema.parse(req.body);
+    const user = await registerWithPassword(input);
+
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        console.error('[Auth] Failed to regenerate session on register:', regenErr);
+        res.status(500).json({ success: false, error: 'SessionError', message: 'Failed to initialize session' });
+        return;
+      }
+
+      (req.session as any).userId = user.id;
+
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('[Auth] Failed to persist session to Redis on register:', saveErr);
+          res.status(500).json({
+            success: false,
+            error: 'SessionPersistenceError',
+            message: 'Failed to establish persistent session in Redis store',
+          });
+          return;
+        }
+
+        res.status(201).json({
+          success: true,
+          message: 'Successfully registered account',
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          },
+        });
+      });
+    });
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ success: false, errors: err.issues });
+      return;
+    }
+    if (err.code === 'USER_ALREADY_EXISTS') {
+      res.status(409).json({
+        success: false,
+        error: 'UserAlreadyExists',
+        message: err.message,
+      });
+      return;
+    }
+    res.status(400).json({
+      success: false,
+      error: 'RegistrationFailed',
+      message: err.message || 'Failed to register account',
+    });
+  }
+});
+
+router.post('/auth/login', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const input = loginSchema.parse(req.body);
+    const normalizedEmail = input.email.toLowerCase().trim();
+    const rateLimitKey = `ratelimit:login:${normalizedEmail}`;
+
+    // Rate limiting: check attempts in Redis
+    const attempts = await redis.get(rateLimitKey);
+    if (attempts && parseInt(attempts, 10) >= 5) {
+      const ttl = await redis.ttl(rateLimitKey);
+      res.status(429).json({
+        success: false,
+        error: 'TooManyRequests',
+        message: `Too many failed login attempts. Please try again in ${Math.ceil(ttl > 0 ? ttl : 60)} seconds.`,
+      });
+      return;
+    }
+
+    let user;
+    try {
+      user = await loginWithPassword(input);
+    } catch {
+      // Increment rate limit attempts in Redis (15-min window)
+      const count = await redis.incr(rateLimitKey);
+      if (count === 1) {
+        await redis.expire(rateLimitKey, 900);
+      }
+      res.status(401).json({
+        success: false,
+        error: 'InvalidCredentials',
+        message: 'Invalid email or password',
+      });
+      return;
+    }
+
+    // Clear rate limit on successful authentication
+    await redis.del(rateLimitKey);
+
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        console.error('[Auth] Failed to regenerate session on login:', regenErr);
+        res.status(500).json({ success: false, error: 'SessionError', message: 'Failed to initialize session' });
+        return;
+      }
+
+      (req.session as any).userId = user.id;
+
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('[Auth] Failed to persist session to Redis on login:', saveErr);
+          res.status(500).json({
+            success: false,
+            error: 'SessionPersistenceError',
+            message: 'Failed to establish persistent session in Redis store',
+          });
+          return;
+        }
+
+        res.json({
+          success: true,
+          message: 'Successfully logged in',
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          },
+        });
+      });
+    });
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ success: false, errors: err.issues });
+      return;
+    }
+    res.status(500).json({
+      success: false,
+      error: 'LoginError',
+      message: err.message || 'An unexpected error occurred during login',
     });
   }
 });

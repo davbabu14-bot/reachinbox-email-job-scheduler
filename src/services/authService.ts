@@ -1,5 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { User } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 import prisma from '../config/db';
 import { env } from '../config/env';
 
@@ -70,4 +71,70 @@ export async function getUserById(id: string): Promise<User | null> {
   return prisma.user.findUnique({
     where: { id },
   });
+}
+
+/**
+ * Registers a new user with an email and hashed password.
+ */
+export async function registerWithPassword(input: {
+  email: string;
+  password: string;
+  name?: string;
+}): Promise<User> {
+  const normalizedEmail = input.email.toLowerCase().trim();
+
+  if (!input.password || input.password.length < 8) {
+    throw new Error('Password must be at least 8 characters long');
+  }
+
+  const existing = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+  });
+
+  if (existing) {
+    const error: any = new Error('An account with this email address already exists');
+    error.code = 'USER_ALREADY_EXISTS';
+    throw error;
+  }
+
+  const passwordHash = await bcrypt.hash(input.password, 10);
+  const name: string = input.name?.trim() || normalizedEmail.split('@')[0] || 'User';
+
+  return prisma.user.create({
+    data: {
+      email: normalizedEmail,
+      name,
+      passwordHash,
+    },
+  });
+}
+
+/**
+ * Authenticates a user with an email and plaintext password.
+ * Returns the user record or throws an error on invalid credentials.
+ */
+export async function loginWithPassword(input: {
+  email: string;
+  password: string;
+}): Promise<User> {
+  const normalizedEmail = input.email.toLowerCase().trim();
+
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+  });
+
+  if (!user || !user.passwordHash) {
+    const error: any = new Error('Invalid email or password');
+    error.code = 'INVALID_CREDENTIALS';
+    throw error;
+  }
+
+  const isValid = await bcrypt.compare(input.password, user.passwordHash);
+  if (!isValid) {
+    const error: any = new Error('Invalid email or password');
+    error.code = 'INVALID_CREDENTIALS';
+    throw error;
+  }
+
+  return user;
 }

@@ -36,4 +36,5 @@ scratch/*
 !scratch/test-rate-limit-slack-alert.js
 !scratch/test-session-persistence.js
 !scratch/test-live-acceptance.js
+!scratch/test-auth-suite.js
 

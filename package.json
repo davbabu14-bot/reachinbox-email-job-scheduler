@@ -28,6 +28,7 @@
     "@elastic/elasticsearch": "^9.5.1",
     "@prisma/client": "^6.19.3",
     "@slack/web-api": "^8.2.0",
+    "bcryptjs": "^3.0.3",
     "bullmq": "^6.3.16",
     "connect-redis": "^10.0.0",
     "cors": "^2.8.6",
@@ -40,6 +41,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/express-session": "^1.19.0",
